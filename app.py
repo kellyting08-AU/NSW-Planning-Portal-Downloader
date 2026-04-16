@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-NSW Planning Portal - File Downloader (Flask Backend v4.1)
+NSW Planning Portal - File Downloader (Flask Backend v4.2)
+Uses a requests Session with cookie warm-up to bypass bot detection.
 """
 
 import os
@@ -18,6 +19,8 @@ requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 app = Flask(__name__)
 CORS(app)
 
+PORTAL_HOME = "https://www.planningportal.nsw.gov.au"
+
 BROWSER_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -32,18 +35,61 @@ BROWSER_HEADERS = {
     "Accept-Encoding":           "identity",
     "Cache-Control":             "no-cache",
     "Pragma":                    "no-cache",
+    "DNT":                       "1",
+    "Connection":                "keep-alive",
+    "Upgrade-Insecure-Requests": "1",
     "Sec-Fetch-Dest":            "document",
     "Sec-Fetch-Mode":            "navigate",
     "Sec-Fetch-Site":            "none",
-    "Upgrade-Insecure-Requests": "1",
+    "Sec-Fetch-User":            "?1",
+    "sec-ch-ua": '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+    "sec-ch-ua-mobile":          "?0",
+    "sec-ch-ua-platform":        '"Windows"',
 }
 
 FILE_HEADERS = {
     **BROWSER_HEADERS,
     "Accept":         "application/pdf,application/octet-stream,*/*;q=0.8",
     "Referer":        "https://www.planningportal.nsw.gov.au/",
+    "Sec-Fetch-Site": "same-origin",
     "Sec-Fetch-Dest": "document",
 }
+
+
+def make_session():
+    """Create a session that visits the portal homepage first to get cookies."""
+    session = requests.Session()
+    session.verify = False
+    try:
+        print("  [session] warming up...")
+        session.get(
+            PORTAL_HOME,
+            headers=BROWSER_HEADERS,
+            timeout=15,
+            allow_redirects=True,
+        )
+        print("  [session] warm-up done, cookies: " + str(dict(session.cookies)))
+    except Exception as e:
+        print("  [session] warm-up failed (continuing): " + str(e))
+    return session
+
+
+def is_cloudflare_block(html):
+    """Return True if Cloudflare returned a challenge page instead of real content."""
+    indicators = [
+        "cf-browser-verification",
+        "challenge-form",
+        "Just a moment",
+        "_cf_chl",
+        "Checking your browser",
+        "cf_clearance",
+        "Please Wait... | Cloudflare",
+        "cf-spinner",
+    ]
+    for indicator in indicators:
+        if indicator in html:
+            return True
+    return False
 
 
 @app.route("/")
@@ -53,7 +99,7 @@ def index():
 
 @app.route("/health")
 def health():
-    return jsonify({"status": "ok", "version": "4.1"})
+    return jsonify({"status": "ok", "version": "4.2"})
 
 
 @app.route("/fetch-page", methods=["POST", "OPTIONS"])
@@ -68,20 +114,30 @@ def fetch_page():
 
     print("[FETCH-PAGE] " + url)
     try:
-        resp = requests.get(
+        session = make_session()
+        resp = session.get(
             url,
             headers=BROWSER_HEADERS,
             timeout=30,
-            verify=False,
             allow_redirects=True,
         )
+
         encoding = resp.encoding or resp.apparent_encoding or "utf-8"
         try:
             text = resp.content.decode(encoding, errors="replace")
         except (LookupError, UnicodeDecodeError):
             text = resp.content.decode("utf-8", errors="replace")
 
-        print("  OK " + str(len(text)) + " chars")
+        print("  OK " + str(len(text)) + " chars  status=" + str(resp.status_code))
+
+        if is_cloudflare_block(text):
+            return jsonify({
+                "error": (
+                    "The NSW Planning Portal blocked this request via Cloudflare. "
+                    "Please try again in a few seconds."
+                )
+            }), 503
+
         return jsonify({"html": text, "url": str(resp.url)})
 
     except Exception as e:
@@ -101,11 +157,11 @@ def fetch_file():
 
     print("[FETCH-FILE] " + url)
     try:
-        resp = requests.get(
+        session = make_session()
+        resp = session.get(
             url,
             headers=FILE_HEADERS,
             timeout=60,
-            verify=False,
             allow_redirects=True,
             stream=True,
         )
@@ -147,6 +203,6 @@ def _preflight():
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
-    print("NSW Planning Portal - File Downloader v4.1")
+    print("NSW Planning Portal - File Downloader v4.2")
     print("Running on port " + str(port))
     app.run(host="0.0.0.0", port=port, debug=False)

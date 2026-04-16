@@ -1,0 +1,566 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>NSW Planning Portal – File Downloader</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+  <style>
+    /* ── Reset ────────────────────────────────────────── */
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:'Segoe UI',Arial,sans-serif;background:#eef2f7;min-height:100vh;display:flex;flex-direction:column}
+
+    /* ── Header ───────────────────────────────────────── */
+    header{background:#002664;color:#fff;padding:0 32px;display:flex;align-items:center;gap:16px;height:66px;box-shadow:0 2px 10px rgba(0,0,0,.45);position:sticky;top:0;z-index:100}
+    .logo{width:42px;height:42px;background:#d7153a;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:11px;color:#fff;flex-shrink:0;text-align:center;line-height:1.3;letter-spacing:-.3px}
+    .hdr-text .t1{font-size:1.08rem;font-weight:700}
+    .hdr-text .t2{font-size:.73rem;opacity:.72;margin-top:1px}
+    .hdr-right{margin-left:auto}
+    .live-badge{display:inline-flex;align-items:center;gap:6px;background:rgba(63,185,80,.18);border:1px solid rgba(63,185,80,.45);border-radius:20px;padding:5px 12px;font-size:.76rem;font-weight:600;color:#3fb950}
+    .ldot{width:8px;height:8px;border-radius:50%;background:#3fb950;animation:lpulse 2s ease-in-out infinite}
+    @keyframes lpulse{0%,100%{opacity:1}50%{opacity:.4}}
+
+    /* ── Main ─────────────────────────────────────────── */
+    main{flex:1;display:flex;justify-content:center;align-items:flex-start;padding:36px 16px 60px}
+    .wrap{width:100%;max-width:820px}
+
+    /* ── Card ─────────────────────────────────────────── */
+    .card{background:#fff;border-radius:14px;box-shadow:0 4px 28px rgba(0,38,100,.11);overflow:hidden;margin-bottom:16px}
+    .card-head{background:linear-gradient(135deg,#1a3c6e,#002664);color:#fff;padding:26px 32px 22px}
+    .card-head h1{font-size:1.3rem;font-weight:700}
+    .card-head p{font-size:.83rem;opacity:.83;margin-top:7px;line-height:1.56}
+    .card-body{padding:26px 32px 30px}
+
+    /* ── URL Input row ────────────────────────────────── */
+    .lbl{display:block;font-size:.76rem;font-weight:700;color:#555;margin-bottom:6px;letter-spacing:.45px;text-transform:uppercase}
+    .input-row{display:flex;gap:10px}
+    #urlInput{flex:1;padding:12px 14px;border:2px solid #c5d1e0;border-radius:8px;font-size:.93rem;color:#111;outline:none;transition:border-color .2s;min-width:0}
+    #urlInput:focus{border-color:#002664}
+    #goBtn{padding:12px 22px;background:#d7153a;color:#fff;border:none;border-radius:8px;font-size:.9rem;font-weight:700;cursor:pointer;white-space:nowrap;display:flex;align-items:center;gap:8px;transition:background .18s,transform .1s;flex-shrink:0}
+    #goBtn:hover:not(:disabled){background:#b3102f}
+    #goBtn:active:not(:disabled){transform:scale(.97)}
+    #goBtn:disabled{background:#9aa5b4;cursor:not-allowed}
+
+    /* ── Hint box ─────────────────────────────────────── */
+    .hint{margin-top:15px;background:#eef3fb;border-left:4px solid #002664;border-radius:0 8px 8px 0;padding:11px 15px;font-size:.79rem;color:#334;line-height:1.6}
+    .hint strong{color:#002664}
+
+    /* ── Step flow ────────────────────────────────────── */
+    .flow{display:flex;gap:8px;margin-top:16px;flex-wrap:wrap}
+    .fstep{background:#f5f8ff;border:1.5px solid #dce6f5;border-radius:7px;padding:9px 13px;font-size:.76rem;color:#334;flex:1;min-width:120px;display:flex;align-items:center;gap:7px}
+    .fsn{background:#002664;color:#fff;border-radius:50%;width:20px;height:20px;min-width:20px;display:flex;align-items:center;justify-content:center;font-size:.68rem;font-weight:800}
+
+    /* ── Progress ─────────────────────────────────────── */
+    #progWrap{margin-top:20px;display:none}
+    .plbl{font-size:.77rem;color:#555;margin-bottom:5px;display:flex;justify-content:space-between}
+    .ptrack{height:9px;background:#dce6f0;border-radius:99px;overflow:hidden}
+    .pfill{height:100%;width:0%;background:linear-gradient(90deg,#002664,#1a6dd6);border-radius:99px;transition:width .35s ease}
+
+    /* ── Log ──────────────────────────────────────────── */
+    #logWrap{margin-top:16px;display:none}
+    .ltitle{font-size:.78rem;font-weight:700;color:#444;margin-bottom:5px;display:flex;align-items:center;gap:6px}
+    #logBox{background:#0d1117;color:#c9d1d9;font-family:'Consolas','Courier New',monospace;font-size:.74rem;line-height:1.65;border-radius:8px;padding:14px 16px;height:260px;overflow-y:auto;word-break:break-all}
+    .li{color:#8b949e}
+    .lok{color:#3fb950}
+    .lwarn{color:#d29922}
+    .lerr{color:#f85149}
+    .lhead{color:#79c0ff;font-weight:700}
+    .lfile{color:#e3b341}
+
+    /* ── Summary ──────────────────────────────────────── */
+    #sumBox{margin-top:16px;display:none;background:#e7f5ec;border:1.5px solid #3fb950;border-radius:8px;padding:14px 20px;font-size:.86rem;color:#1a4730;line-height:1.75}
+    .sum-title{font-weight:700;font-size:.97rem;margin-bottom:6px}
+
+    /* ── Footer ───────────────────────────────────────── */
+    footer{text-align:center;padding:14px 16px;font-size:.72rem;color:#8a9aaa;line-height:1.7}
+
+    /* ── Spinner ──────────────────────────────────────── */
+    .spin{display:inline-block;width:13px;height:13px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:sp .65s linear infinite}
+    @keyframes sp{to{transform:rotate(360deg)}}
+
+    /* ── Responsive tweaks ────────────────────────────── */
+    @media(max-width:540px){
+      .input-row{flex-direction:column}
+      #goBtn{justify-content:center}
+      .flow{gap:6px}
+      .fstep{min-width:calc(50% - 6px)}
+    }
+  </style>
+</head>
+<body>
+
+<!-- ══ HEADER ══ -->
+<header>
+  <div class="logo">NSW</div>
+  <div class="hdr-text">
+    <div class="t1">NSW Planning Portal</div>
+    <div class="t2">Major Projects – File Downloader</div>
+  </div>
+  <div class="hdr-right">
+    <div class="live-badge">
+      <div class="ldot"></div>
+      Live
+    </div>
+  </div>
+</header>
+
+<!-- ══ MAIN ══ -->
+<main>
+<div class="wrap">
+  <div class="card">
+    <div class="card-head">
+      <h1>&#128193; Project File Downloader</h1>
+      <p>Enter a NSW Major Planning Portal project URL. The tool will discover all document
+         groups, download every file, and bundle everything into a structured ZIP archive —
+         one subfolder per document group, matching the portal layout exactly.</p>
+    </div>
+    <div class="card-body">
+
+      <!-- URL input -->
+      <label class="lbl" for="urlInput">Project URL</label>
+      <div class="input-row">
+        <input id="urlInput" type="url"
+          placeholder="https://www.planningportal.nsw.gov.au/major-projects/projects/320-badgerys-creek-road-warehouse-estate"
+          autocomplete="off" spellcheck="false"/>
+        <button id="goBtn" onclick="run()">
+          <span id="bIcon">&#11015;</span>
+          <span id="bTxt">Fetch &amp; Download ZIP</span>
+        </button>
+      </div>
+
+      <!-- Hint -->
+      <div class="hint">
+        <strong>How it works:</strong> Paste any NSW Major Planning Portal project URL above.
+        The server fetches the page with full browser headers, extracts all document groups
+        from the embedded page data, downloads every file, and delivers them as a single
+        structured ZIP — grouped exactly as they appear on the portal.
+      </div>
+
+      <!-- Step flow -->
+      <div class="flow">
+        <div class="fstep"><span class="fsn">1</span>Paste project URL</div>
+        <div class="fstep"><span class="fsn">2</span>Click Fetch &amp; Download</div>
+        <div class="fstep"><span class="fsn">3</span>Watch the activity log</div>
+        <div class="fstep"><span class="fsn">4</span>ZIP downloads automatically</div>
+      </div>
+
+      <!-- Progress bar -->
+      <div id="progWrap">
+        <div class="plbl">
+          <span id="pLbl">Starting…</span>
+          <span id="pPct">0%</span>
+        </div>
+        <div class="ptrack"><div class="pfill" id="pFill"></div></div>
+      </div>
+
+      <!-- Activity log -->
+      <div id="logWrap">
+        <div class="ltitle">&#128203; Activity Log</div>
+        <div id="logBox"></div>
+      </div>
+
+      <!-- Summary -->
+      <div id="sumBox">
+        <div class="sum-title">&#x2705; Download Complete</div>
+        <div id="sumTxt"></div>
+      </div>
+
+    </div><!-- /card-body -->
+  </div><!-- /card -->
+</div><!-- /wrap -->
+</main>
+
+<footer>
+  Hosted on Render &nbsp;·&nbsp;
+  Reads only publicly accessible documents from the NSW Planning Portal &nbsp;·&nbsp;
+  No credentials stored or transmitted
+</footer>
+
+<script>
+/* ══════════════════════════════════════════════════════════════════
+   NSW Planning Portal File Downloader  v4.0
+   ══════════════════════════════════════════════════════════════════
+   This frontend is served by Flask (same origin).
+   All API calls use relative paths — NO localhost, NO CORS proxy.
+
+   Flow:
+     1.  POST /fetch-page  → Flask fetches the portal page server-side
+     2.  Parse __NEXT_DATA__ JSON from the returned HTML
+     3.  Walk JSON tree to find document groups + file metadata
+     4.  POST /fetch-file  → Flask downloads each file, returns base64
+     5.  JSZip builds the archive; FileSaver triggers the download
+   ══════════════════════════════════════════════════════════════════ */
+
+// Same-origin: Flask serves both frontend and API
+const API = "";
+
+// ── Logging ───────────────────────────────────────────────────────
+function log(msg, cls) {
+  cls = cls || "li";
+  const box = document.getElementById("logBox");
+  const ts  = new Date().toLocaleTimeString("en-AU");
+  const el  = document.createElement("div");
+  el.className   = cls;
+  el.textContent = "[" + ts + "]  " + msg;
+  box.appendChild(el);
+  box.scrollTop = box.scrollHeight;
+}
+
+// ── Progress ──────────────────────────────────────────────────────
+function prog(pct, lbl) {
+  document.getElementById("pFill").style.width = pct + "%";
+  document.getElementById("pPct").textContent  = Math.round(pct) + "%";
+  if (lbl) document.getElementById("pLbl").textContent = lbl;
+}
+
+// ── Sanitise folder/filename characters ───────────────────────────
+function san(s) {
+  return (s || "").replace(/[\\/\:*?"<>|]/g, "_").replace(/\s+/g, " ").trim().slice(0, 120);
+}
+
+// ── Guess filename from URL ────────────────────────────────────────
+function guessName(url, group, idx) {
+  try {
+    const parts = new URL(url).pathname.split("/");
+    const last  = parts[parts.length - 1];
+    if (last && last.indexOf(".") > -1) return decodeURIComponent(last);
+  } catch(e) {}
+  return san(group) + "_doc_" + (idx + 1) + ".pdf";
+}
+
+/* ──────────────────────────────────────────────────────────────────
+   Document group detection helpers
+   ────────────────────────────────────────────────────────────────── */
+const GROUP_NAME_KEYS = ["name","title","category","groupName","type","heading","label","displayName"];
+const DOCS_KEYS       = ["documents","files","attachments","items","resources","docs"];
+const URL_KEYS        = ["downloadUrl","download_url","url","fileUrl","href","link","uri",
+                         "path","publicUrl","src","viewUrl","documentUrl","attachmentUrl"];
+const NAME_KEYS       = ["fileName","file_name","filename","name","title","displayName",
+                         "originalFilename","documentName","attachmentName","originalName"];
+
+// Recursively scan a JSON tree for document-group arrays
+function deepFindGroups(obj, depth) {
+  depth = depth || 0;
+  if (depth > 15 || !obj || typeof obj !== "object") return null;
+
+  if (Array.isArray(obj) && obj.length > 0 && typeof obj[0] === "object" && obj[0] !== null) {
+    const s = obj[0];
+    const hasName = GROUP_NAME_KEYS.some(function(k){ return typeof s[k] === "string"; });
+    let docsKey = null;
+    for (let i = 0; i < DOCS_KEYS.length; i++) {
+      if (Array.isArray(s[DOCS_KEYS[i]])) { docsKey = DOCS_KEYS[i]; break; }
+    }
+    if (hasName && docsKey) {
+      const groups = [];
+      obj.forEach(function(g) {
+        let gName = "";
+        GROUP_NAME_KEYS.forEach(function(k){ if (!gName && typeof g[k] === "string") gName = g[k]; });
+        const docs = g[docsKey] || [];
+        if (docs.length > 0) groups.push({ groupName: gName || "Documents", docs: docs });
+      });
+      if (groups.length > 0) return groups;
+    }
+  }
+
+  const keys = Object.keys(obj);
+  for (let j = 0; j < keys.length; j++) {
+    const r = deepFindGroups(obj[keys[j]], depth + 1);
+    if (r) return r;
+  }
+  return null;
+}
+
+// Try well-known NSW Planning Portal JSON paths first (fast path)
+function tryKnownPaths(nd) {
+  const pp = (nd && nd.props && nd.props.pageProps) ? nd.props.pageProps : null;
+  if (!pp) return null;
+
+  const candidates = [
+    pp.project     && pp.project.documents,
+    pp.project     && pp.project.attachments,
+    pp.project     && pp.project.documentGroups,
+    pp.project     && pp.project.files,
+    pp.application && pp.application.documents,
+    pp.application && pp.application.attachments,
+    pp.data        && pp.data.documents,
+    pp.data        && pp.data.documentGroups,
+    pp.documents, pp.attachments, pp.documentGroups, pp.files,
+    pp.initialState && pp.initialState.project && pp.initialState.project.documents,
+  ];
+
+  for (let i = 0; i < candidates.length; i++) {
+    const c = candidates[i];
+    if (Array.isArray(c) && c.length > 0) {
+      log("  Found document data at known pageProps path.", "lok");
+      const grp = deepFindGroups(c);
+      if (grp) return grp;
+      return [{ groupName: "Documents", docs: c }];
+    }
+  }
+  return null;
+}
+
+// Extract a download URL from a document object
+function extractUrl(doc) {
+  const base = "https://www.planningportal.nsw.gov.au";
+  for (let i = 0; i < URL_KEYS.length; i++) {
+    const v = doc[URL_KEYS[i]];
+    if (typeof v === "string" && v.length > 0) {
+      if (v.startsWith("http")) return v;
+      if (v.startsWith("/"))    return base + v;
+    }
+  }
+  const subKeys = Object.keys(doc);
+  for (let j = 0; j < subKeys.length; j++) {
+    const sub = doc[subKeys[j]];
+    if (sub && typeof sub === "object" && !Array.isArray(sub)) {
+      for (let k = 0; k < URL_KEYS.length; k++) {
+        const sv = sub[URL_KEYS[k]];
+        if (typeof sv === "string" && sv.length > 0) {
+          if (sv.startsWith("http")) return sv;
+          if (sv.startsWith("/"))    return base + sv;
+        }
+      }
+      const id = sub.documentId || sub.fileId || sub.id || sub.referenceId;
+      if (id) return base + "/api/ipa/development-applications/documents/download/" + id;
+    }
+  }
+  const tid = doc.documentId || doc.fileId || doc.referenceId;
+  if (tid) return base + "/api/ipa/development-applications/documents/download/" + tid;
+  return null;
+}
+
+// Extract a display filename from a document object
+function extractName(doc) {
+  for (let i = 0; i < NAME_KEYS.length; i++) {
+    const v = doc[NAME_KEYS[i]];
+    if (typeof v === "string" && v.trim().length > 0) return v.trim();
+  }
+  return null;
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   MAIN — triggered by button / Enter key
+   ══════════════════════════════════════════════════════════════════ */
+async function run() {
+  const btn    = document.getElementById("goBtn");
+  const input  = document.getElementById("urlInput");
+  const rawUrl = input.value.trim();
+
+  if (!rawUrl || rawUrl.indexOf("planningportal.nsw.gov.au") === -1) {
+    alert("Please enter a valid NSW Planning Portal project URL.\nExample:\nhttps://www.planningportal.nsw.gov.au/major-projects/projects/320-badgerys-creek-road-warehouse-estate");
+    return;
+  }
+
+  // Reset UI state
+  btn.disabled = true;
+  document.getElementById("bIcon").innerHTML  = "<span class=\"spin\"></span>";
+  document.getElementById("bTxt").textContent  = "Working…";
+  document.getElementById("progWrap").style.display = "block";
+  document.getElementById("logWrap").style.display  = "block";
+  document.getElementById("sumBox").style.display   = "none";
+  document.getElementById("logBox").innerHTML = "";
+  prog(0, "Starting…");
+
+  const slugM = rawUrl.match(/\/projects\/([^/?#]+)/);
+  const slug  = slugM ? slugM[1] : "project";
+  log("Project: " + slug, "lhead");
+
+  try {
+
+    // ── STEP 1: Fetch the portal page via Flask backend ───────────
+    const pageUrl = rawUrl.split("?")[0];
+    log("Fetching: " + pageUrl, "li");
+    prog(8, "Fetching project page…");
+
+    const pRes  = await fetch(API + "/fetch-page", {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify({ url: pageUrl })
+    });
+    const pJson = await pRes.json();
+    if (pJson.error) throw new Error("Page fetch failed: " + pJson.error);
+
+    const html = pJson.html;
+    log("Page received (" + (html.length / 1024).toFixed(1) + " KB)", "lok");
+    prog(22, "Parsing page data…");
+
+    // ── STEP 2: Extract __NEXT_DATA__ from the HTML ───────────────
+    let groups = [];
+    const ndMatch = html.match(/<script[^>]+id=["']__NEXT_DATA__["'][^>]*>([\s\S]*?)<\/script>/i);
+
+    if (ndMatch) {
+      log("Found __NEXT_DATA__ JSON blob.", "lok");
+      try {
+        const nd = JSON.parse(ndMatch[1]);
+        log("Parsed Next.js data successfully.", "lok");
+
+        // Fast path: try known explicit locations
+        const kResult = tryKnownPaths(nd);
+        if (kResult && kResult.length > 0) {
+          groups = kResult;
+          log("Found " + groups.length + " group(s) via known paths.", "lok");
+        } else {
+          // Slow path: deep recursive scan
+          log("Running deep JSON tree scan…", "li");
+          const dResult = deepFindGroups(nd);
+          if (dResult && dResult.length > 0) {
+            groups = dResult;
+            log("Deep scan found " + groups.length + " group(s).", "lok");
+          } else {
+            log("No document groups found in __NEXT_DATA__.", "lwarn");
+          }
+        }
+      } catch(e) {
+        log("JSON parse error: " + e.message, "lwarn");
+      }
+    } else {
+      log("No __NEXT_DATA__ tag found.", "lwarn");
+    }
+
+    // ── STEP 3: Portal document API fallback ─────────────────────
+    if (groups.length === 0) {
+      const appM = html.match(/\b(SSD|SSI|MP)-\d+\b/i);
+      if (appM) {
+        const appNum = appM[0].toUpperCase();
+        log("Trying portal API with app number: " + appNum, "li");
+        const apiUrls = [
+          "https://www.planningportal.nsw.gov.au/api/ipa/development-applications/" + appNum + "/documents",
+          "https://www.planningportal.nsw.gov.au/api/major-projects/projects/" + appNum + "/documents",
+        ];
+        for (let ai = 0; ai < apiUrls.length; ai++) {
+          log("  → " + apiUrls[ai], "li");
+          try {
+            const aRes  = await fetch(API + "/fetch-page", {
+              method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ url: apiUrls[ai] })
+            });
+            const aJson = await aRes.json();
+            if (!aJson.error) {
+              const aFound = deepFindGroups(JSON.parse(aJson.html));
+              if (aFound && aFound.length > 0) {
+                groups = aFound;
+                log("API returned " + groups.length + " group(s).", "lok");
+                break;
+              }
+            }
+          } catch(e2) {
+            log("  API call failed: " + e2.message, "lwarn");
+          }
+        }
+      }
+    }
+
+    if (groups.length === 0) {
+      throw new Error(
+        "No document groups found on this project page.\n\n" +
+        "Possible reasons:\n" +
+        "  - The project has no uploaded documents yet\n" +
+        "  - The portal updated its page structure\n" +
+        "  - The URL does not point to a project page\n\n" +
+        "Please verify the URL and try again."
+      );
+    }
+
+    prog(36, "Found " + groups.length + " group(s) — collecting files…");
+
+    // ── STEP 4: Build the complete file list ──────────────────────
+    const allFiles = [];
+    groups.forEach(function(g) {
+      const gName = san(g.groupName) || "Documents";
+      log("\u25b6 Group: \"" + gName + "\"  (" + g.docs.length + " doc(s))", "lhead");
+      g.docs.forEach(function(d, i) {
+        const url   = extractUrl(d);
+        if (!url) { log("  [" + (i+1) + "] No URL — skipping", "lwarn"); return; }
+        const fname = san(extractName(d) || guessName(url, gName, i));
+        log("  [" + (i+1) + "] " + fname, "lfile");
+        allFiles.push({ groupName: gName, filename: fname, url: url });
+      });
+    });
+
+    if (allFiles.length === 0) {
+      throw new Error("Document groups were found but contained no downloadable file URLs.");
+    }
+
+    log("\nTotal: " + allFiles.length + " file(s) to download.", "lok");
+    prog(42, "Downloading files…");
+
+    // ── STEP 5: Download each file via Flask backend ──────────────
+    const zip  = new JSZip();
+    const root = san(slug);
+    let ok = 0, fail = 0;
+
+    for (let fi = 0; fi < allFiles.length; fi++) {
+      const f   = allFiles[fi];
+      const pct = 42 + (fi / allFiles.length * 48);
+      prog(pct, "Downloading " + (fi + 1) + " / " + allFiles.length + "…");
+      log("\u2193 " + f.groupName + "/" + f.filename, "li");
+
+      try {
+        const fRes  = await fetch(API + "/fetch-file", {
+          method:  "POST",
+          headers: { "Content-Type": "application/json" },
+          body:    JSON.stringify({ url: f.url })
+        });
+        const fData = await fRes.json();
+        if (fData.error) throw new Error(fData.error);
+
+        // Decode base64 → Uint8Array
+        const bStr = atob(fData.data);
+        const buf  = new Uint8Array(bStr.length);
+        for (let bi = 0; bi < bStr.length; bi++) buf[bi] = bStr.charCodeAt(bi);
+
+        const finalName = san(fData.filename || f.filename);
+        zip.file(root + "/" + f.groupName + "/" + finalName, buf);
+        ok++;
+        log("  \u2713 " + (buf.length / 1024).toFixed(1) + " KB  \u2192  " + finalName, "lok");
+      } catch(e3) {
+        fail++;
+        log("  \u2717 Failed: " + e3.message, "lerr");
+      }
+    }
+
+    // ── STEP 6: Build ZIP and trigger download ────────────────────
+    prog(92, "Building ZIP archive…");
+    log("\nGenerating ZIP archive…", "li");
+
+    const blob    = await zip.generateAsync({ type: "blob", compression: "DEFLATE", compressionOptions: { level: 6 } });
+    const zipName = root + "_documents.zip";
+    saveAs(blob, zipName);
+
+    prog(100, "Complete!");
+    log("\u2705 ZIP saved: " + zipName, "lok");
+
+    // ── STEP 7: Show summary ──────────────────────────────────────
+    const grpLines = groups.map(function(g) {
+      const gn  = san(g.groupName);
+      const cnt = allFiles.filter(function(f){ return f.groupName === gn; }).length;
+      return "&nbsp;&nbsp;&#128194; <strong>" + g.groupName + "</strong>: " + cnt + " file(s)";
+    }).join("<br>");
+
+    document.getElementById("sumTxt").innerHTML =
+      "<strong>ZIP file:</strong> " + zipName + "<br>" +
+      "<strong>Downloaded:</strong> " + ok + " file(s)" +
+      (fail > 0 ? "&nbsp;&nbsp;|&nbsp;&nbsp;<strong style=\"color:#c0392b\">Failed: " + fail + "</strong>" : "") +
+      "<br><br>Subfolders:<br>" + grpLines;
+    document.getElementById("sumBox").style.display = "block";
+
+  } catch(err) {
+    log("\nERROR: " + err.message, "lerr");
+    prog(0, "Failed.");
+    alert("Download failed:\n\n" + err.message);
+  } finally {
+    btn.disabled = false;
+    document.getElementById("bIcon").textContent = "\u2B07";
+    document.getElementById("bTxt").textContent  = "Fetch & Download ZIP";
+  }
+}
+
+// Enter key in URL field triggers run()
+document.getElementById("urlInput").addEventListener("keydown", function(e) {
+  if (e.key === "Enter") run();
+});
+</script>
+</body>
+</html>

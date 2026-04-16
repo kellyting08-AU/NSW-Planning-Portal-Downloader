@@ -1,32 +1,23 @@
 #!/usr/bin/env python3
 """
-NSW Planning Portal – File Downloader  (Flask Backend)
-=======================================================
-Serves the frontend and acts as a CORS-bypass proxy for
-the NSW Planning Portal website.
-
-Routes:
-  GET  /            -> index.html (frontend UI)
-  GET  /health      -> {"status":"ok","version":"4.0"}
-  POST /fetch-page  -> fetch remote HTML page server-side
-  POST /fetch-file  -> fetch remote binary file, return base64
-
-Deploy: push to GitHub, connect to Render.com (free tier).
+NSW Planning Portal - File Downloader (Flask Backend v4.1)
 """
 
-import os, base64, re
-from flask import Flask, request, jsonify, render_template
+import os
+import base64
+import re
+from urllib.parse import unquote, urlparse
+
+from flask import Flask, request, jsonify, render_template, Response
 from flask_cors import CORS
 import requests
 from requests.packages.urllib3.exceptions import InsecureRequestWarning
 
-# Suppress SSL warnings (we disable verification to handle edge-case cert issues)
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
 app = Flask(__name__)
-CORS(app)  # Allow all origins — needed for local dev if frontend is served separately
+CORS(app)
 
-# ── Browser-like headers sent with every outbound request ────────────────────
 BROWSER_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -37,37 +28,34 @@ BROWSER_HEADERS = {
         "text/html,application/xhtml+xml,application/xml;"
         "q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8"
     ),
-    "Accept-Language":   "en-AU,en-GB;q=0.9,en;q=0.8",
-    "Accept-Encoding":   "identity",   # plain text — avoids decompression complexity
-    "Cache-Control":     "no-cache",
-    "Pragma":            "no-cache",
-    "Sec-Fetch-Dest":    "document",
-    "Sec-Fetch-Mode":    "navigate",
-    "Sec-Fetch-Site":    "none",
+    "Accept-Language":           "en-AU,en-GB;q=0.9,en;q=0.8",
+    "Accept-Encoding":           "identity",
+    "Cache-Control":             "no-cache",
+    "Pragma":                    "no-cache",
+    "Sec-Fetch-Dest":            "document",
+    "Sec-Fetch-Mode":            "navigate",
+    "Sec-Fetch-Site":            "none",
     "Upgrade-Insecure-Requests": "1",
 }
 
 FILE_HEADERS = {
     **BROWSER_HEADERS,
-    "Accept":     "application/pdf,application/octet-stream,*/*;q=0.8",
-    "Referer":    "https://www.planningportal.nsw.gov.au/",
+    "Accept":         "application/pdf,application/octet-stream,*/*;q=0.8",
+    "Referer":        "https://www.planningportal.nsw.gov.au/",
     "Sec-Fetch-Dest": "document",
 }
 
 
-# ── Frontend ──────────────────────────────────────────────────────────────────
 @app.route("/")
 def index():
     return render_template("index.html")
 
 
-# ── Health check ──────────────────────────────────────────────────────────────
 @app.route("/health")
 def health():
-    return jsonify({"status": "ok", "version": "4.0"})
+    return jsonify({"status": "ok", "version": "4.1"})
 
 
-# ── Fetch page ────────────────────────────────────────────────────────────────
 @app.route("/fetch-page", methods=["POST", "OPTIONS"])
 def fetch_page():
     if request.method == "OPTIONS":
@@ -76,9 +64,9 @@ def fetch_page():
     data = request.get_json(force=True, silent=True) or {}
     url  = (data.get("url") or "").strip()
     if not url:
-        return jsonify({"error": "Missing 'url' field"}), 400
+        return jsonify({"error": "Missing url"}), 400
 
-    print(f"[FETCH-PAGE]  {url}")
+    print("[FETCH-PAGE] " + url)
     try:
         resp = requests.get(
             url,
@@ -87,22 +75,20 @@ def fetch_page():
             verify=False,
             allow_redirects=True,
         )
-        # Detect encoding — requests uses apparent_encoding as fallback
         encoding = resp.encoding or resp.apparent_encoding or "utf-8"
         try:
             text = resp.content.decode(encoding, errors="replace")
         except (LookupError, UnicodeDecodeError):
             text = resp.content.decode("utf-8", errors="replace")
 
-        print(f"  OK  {len(text):,} chars  status={resp.status_code}  enc={encoding}")
+        print("  OK " + str(len(text)) + " chars")
         return jsonify({"html": text, "url": str(resp.url)})
 
     except Exception as e:
-        print(f"  ERROR  {e}")
+        print("  ERROR " + str(e))
         return jsonify({"error": str(e)}), 500
 
 
-# ── Fetch file ────────────────────────────────────────────────────────────────
 @app.route("/fetch-file", methods=["POST", "OPTIONS"])
 def fetch_file():
     if request.method == "OPTIONS":
@@ -111,9 +97,9 @@ def fetch_file():
     data = request.get_json(force=True, silent=True) or {}
     url  = (data.get("url") or "").strip()
     if not url:
-        return jsonify({"error": "Missing 'url' field"}), 400
+        return jsonify({"error": "Missing url"}), 400
 
-    print(f"[FETCH-FILE]  {url}")
+    print("[FETCH-FILE] " + url)
     try:
         resp = requests.get(
             url,
@@ -125,21 +111,21 @@ def fetch_file():
         )
         raw = resp.content
 
-        # Extract filename from Content-Disposition header
-        cd       = resp.headers.get("Content-Disposition", "")
         filename = None
-        m = re.search(r'filename\*?=["']?(?:UTF-8'')?([^"'
-;]+)', cd, re.I)
+        cd = resp.headers.get("Content-Disposition", "")
+        m = re.search(r'filename[^;=\n]*=([^;\n]*)', cd, re.IGNORECASE)
         if m:
-            from urllib.parse import unquote
-            filename = unquote(m.group(1).strip().strip('"''))
+            filename = m.group(1).strip().strip('"\'')
+            filename = unquote(filename)
 
         if not filename:
-            from urllib.parse import urlparse, unquote
-            path     = urlparse(str(resp.url)).path
-            filename = unquote(path.split("/")[-1]) or "document.pdf"
+            path = urlparse(str(resp.url)).path
+            filename = unquote(path.split("/")[-1])
 
-        print(f"  OK  {len(raw):,} bytes  →  {filename}")
+        if not filename:
+            filename = "document.pdf"
+
+        print("  OK " + str(len(raw)) + " bytes -> " + filename)
         return jsonify({
             "data":     base64.b64encode(raw).decode("ascii"),
             "filename": filename,
@@ -147,13 +133,11 @@ def fetch_file():
         })
 
     except Exception as e:
-        print(f"  ERROR  {e}")
+        print("  ERROR " + str(e))
         return jsonify({"error": str(e)}), 500
 
 
-# ── CORS preflight helper ─────────────────────────────────────────────────────
 def _preflight():
-    from flask import Response
     r = Response()
     r.headers["Access-Control-Allow-Origin"]  = "*"
     r.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
@@ -161,13 +145,8 @@ def _preflight():
     return r, 204
 
 
-# ── Entry point ───────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
-    print("\n" + "═"*56)
-    print("  NSW Planning Portal – File Downloader  v4.0")
-    print("═"*56)
-    print(f"  URL:  http://0.0.0.0:{port}")
-    print("  Stop: Ctrl+C")
-    print("═"*56 + "\n")
+    print("NSW Planning Portal - File Downloader v4.1")
+    print("Running on port " + str(port))
     app.run(host="0.0.0.0", port=port, debug=False)
